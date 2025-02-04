@@ -1,0 +1,67 @@
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    steps:
+      - checkout
+      - run:
+          name: Build Docker image
+          command: |
+            docker build -t my-node-app .
+      - run:
+          name: Save Docker image
+          command: |
+            docker save my-node-app | gzip > my-node-app.tar.gz
+      - persist_to_workspace:
+          root: .
+          paths:
+            - my-node-app.tar.gz
+
+  test:
+    machine: true
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Load Docker image
+          command: |
+            gunzip -c ./my-node-app.tar.gz | docker load
+      - run:
+          name: Run Docker container
+          command: |
+            docker run -d -p 8080:8080 --name my-node-app my-node-app
+      - run:
+          name: Test Docker container
+          command: |
+            curl --fail http://localhost:8080 || (docker logs my-node-app && exit 1)
+
+  push:
+    machine: true
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Load Docker image
+          command: |
+            gunzip -c ./my-node-app.tar.gz | docker load
+      - run:
+          name: Push Docker image
+          command: |
+            echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
+            docker tag my-node-app $DOCKERHUB_USERNAME/my-node-app:latest
+            docker push $DOCKERHUB_USERNAME/my-node-app:latest
+
+workflows:
+  version: 2
+  build-and-test:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - push:
+          requires:
+            - test
